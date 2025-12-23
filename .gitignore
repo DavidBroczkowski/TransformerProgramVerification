@@ -8,6 +8,7 @@ Gemfile.lock
 *__pycache__*
 
 data/
+output/
 
 # IDE files
 .idea/
@@ -22,7 +23,9 @@ data/
 *.sln.docstates
 
 # Virtual environments
+.venv/
 venv/
 venv_*/
 env/
 ENV/
+

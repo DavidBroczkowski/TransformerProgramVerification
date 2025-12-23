@@ -1,7 +1,6 @@
 """
-Здесь мы полностью переписываем логику генерации Z3-скрипта, чтобы она не
-зависела от промежуточного Python-кода, а напрямую извлекала всю необходимую
-информацию из самой модели (аналогично тому, как это делает model_to_code).
+Here we are completely rewriting the logic of Z3 script generation so that it does not depend on intermediate Python code,
+but directly extracts all the necessary information from the model itself (similar to how model_to_code works).
 """
 from __future__ import annotations
 import inspect
@@ -24,10 +23,9 @@ import pandas as pd
 
 def _cat_head_to_z3(model, layer_idx: int, head_idx: int, idx_w: Sequence[str], autoregressive: bool = False) -> str:
     """
-    Генерирует Z3-предикат для категориальной attention-головы.
-    Пример результата может выглядеть как некая функция (define-fun cat_head_{layer_idx}_{head_idx}),
-    возвращающая Bool. Внутри можно описать набор условий (Or/And/If): при каком (q,k) голова срабатывает.
-    Здесь используется информация о том, каковы ключи / query (как в cat_head_to_code, только без генерации Python).
+    Generates a Z3 predicate for a categorical attention head. An example result might look like a function (define-fun cat_head_{layer_idx}_{head_idx}) returning a Bool.
+    Inside, you can describe a set of conditions (Or/And/If): for which (q, k) the head activates.
+    It uses information about what the keys/queries are (like in cat_head_to_code, but without generating Python).
     """
     import torch
     import numpy as np
@@ -104,9 +102,9 @@ def {func_name}({q_name}, {k_name}):
 
 def _num_head_to_z3(model, layer_idx: int, head_idx: int, autoregressive: bool = False) -> str:
     """
-    Генерирует Z3-предикат для числовой attention-головы.
-    Аналогично _cat_head_to_z3, только, возможно, сходу сравниваем числовые значения
-    (например, при q>k или q==k) – в зависимости от весов модели.
+    Generates a Z3 predicate for a numerical attention head.  
+    Similar to _cat_head_to_z3, but possibly compares numerical values directly  
+    (for example, for q>k or q==k) – depending on the model's weights.
     """
     import torch
     import numpy as np
@@ -177,9 +175,9 @@ def {func_name}({q_name}, {k_name}):
 
 def _cat_mlp_to_z3(model, layer_idx: int, mlp_idx: int, idx_w: Sequence[str]) -> str:
     """
-    Генерирует выражение MLP для категориальной части.
-    Предположим, это (define-fun cat_mlp_{layer_idx}_{mlp_idx} ((pos Int) (tok String)) Int).
-    Возвращает какое-то целое значение, например различное в зависимости от (pos,tok).
+    Generates an MLP expression for the categorical part.
+    Suppose it is (define-fun cat_mlp_{layer_idx}_{mlp_idx} ((pos Int) (tok String)) Int).
+    Returns some integer value, for example, varying depending on (pos, tok).
     """
     import torch
     import numpy as np
@@ -281,8 +279,8 @@ def {func_name}({param_list}):
 
 def _num_mlp_to_z3(model, layer_idx: int, mlp_idx: int) -> str:
     """
-    Генерирует выражение MLP для числовой части. Предположим, это аналогичная
-    функция (define-fun num_mlp_{layer_idx}_{mlp_idx} ((pos Int) (val Int)) Int).
+    Generates an MLP expression for the numeric part.
+    Suppose this is a similar function (define-fun num_mlp_{layer_idx}_{mlp_idx} ((pos Int) (val Int)) Int).
     """
     import torch
     import numpy as np
@@ -383,8 +381,8 @@ def {func_name}({param_list}):
 
 def _generate_static_z3() -> str:
     """
-    Генерирует статические вспомогательные функции (select, aggregate, и т. п.).
-    Возвращает строку с определениями функций для Z3 скрипта.
+    Generates static helper functions (select, aggregate, etc.).
+    Returns a string with function definitions for a Z3 script.
     """
     lines = []
 
@@ -476,8 +474,8 @@ def _generate_static_z3() -> str:
 
 def _generate_build_pipeline_by_run(model) -> str:
     """
-    Возвращает Z3-функции/выражения, которые отражают логику run(...).
-    Автоматически определяет порядок слоев и их выходов на основе структуры модели.
+    Returns Z3 functions/expressions that reflect the logic of run(...).
+    Automatically determines the order of layers and their outputs based on the model's structure.
     """
     lines = []
     lines.append("def build_pipeline(solver, tokens, position_vars):")
@@ -676,9 +674,8 @@ def _generate_build_pipeline_by_run(model) -> str:
 
 def _generate_predictions_code() -> str:
     """
-    Генерирует код Z3, который считает 'оригинальные' предсказания модели.
-    Создает функцию compute_original_predictions, которая вызывает build_pipeline
-    и затем извлекает предсказания.
+    Generates Z3 code that computes the 'original' model predictions.
+    Creates a function compute_original_predictions, which calls build_pipeline and then extracts the predictions.
     """
     return """
 def compute_original_predictions(input_tokens):
@@ -717,9 +714,8 @@ def model_to_Z3(
     save: bool = True,
 ) -> str:
     """
-    Генерирует готовый Z3-скрипт напрямую из модели, без промежуточного Python.
-    Логика аналогична тому, что делает model_to_code: просто ходим по
-    слою/головам/MLP и собираем в Z3-формат.
+    Generates a ready-made Z3 script directly from the model, without an intermediate Python step.
+    The logic is similar to what model_to_code does: we simply go through the layer/heads/MLP and assemble it into Z3 format.
     """
     import torch
 
@@ -851,7 +847,7 @@ def export_model_to_Z3(
     **kwargs,
 ) -> Path:
     """
-    Стандартная обёртка: получает Z3-скрипт и сразу пишет в файл.
+    Standard wrapper: takes a Z3 script and immediately writes it to a file.
     """
     output_dir = Path(output_dir)
     output_file = output_dir / f"{name}_Z3.py"
