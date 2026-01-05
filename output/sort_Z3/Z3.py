@@ -11,7 +11,7 @@ def build_attention_block(solver, keys, queries, predicate_expr, values, name):
     attn = [[Bool(f"attn_{name}_{i}_{j}") for j in range(N)] for i in range(N)]
     any_match = [Bool(f"any_{name}_{i}") for i in range(N)]
 
-    # check if there's a match for each i
+    # check if there's any key match for each query i
     for i in range(N):
         solver.add(
             any_match[i] == Or([predicate_expr(queries[i], keys[j]) for j in range(N)])

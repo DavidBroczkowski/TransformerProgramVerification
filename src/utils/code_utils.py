@@ -754,7 +754,7 @@ def model_to_code(
         enum_fn = Path(output_dir) / (
             f"{name}_embeddings" if name else "embeddings"
         )
-        s = str(enum_fn).replace("/", ".")
+        s = enum_fn.as_posix().replace("/", ".")
         header.append(
             f"from {s} import "
             + ", ".join([f"Emb{i}" for i in range(model.embed.n_vars)])
@@ -778,9 +778,9 @@ def model_to_code(
             enums=embed_enums,
             unembed_mask=unembed_mask,
         )
-        unembed_fn = fn = Path(output_dir) / (
+        unembed_fn = fn = (Path(output_dir) / (
             f"{name}_weights.csv" if name else "classifier_weights.csv"
-        )
+        )).as_posix()
         if save:
             print(f"writing {unembed_df.shape} classifier weights to {fn}")
             unembed_df.to_csv(fn)
@@ -810,9 +810,9 @@ def model_to_code(
 
     if (not one_hot) and (embed_csv or embed_enums):
         embed_df = get_embed_df(model.embed, idx_w)
-        embed_fn = fn = Path(output_dir) / (
+        embed_fn = fn = (Path(output_dir) / (
             f"{name}_embeddings.csv" if name else "embeddings.csv"
-        )
+        )).as_posix()
         if save:
             print(f"writing {embed_df.shape} embeddings weights to {fn}")
             embed_df.to_csv(fn)
@@ -822,9 +822,9 @@ def model_to_code(
             for i in range(model.n_vars_cat):
                 lines.append(get_score(f"var{i}_embeddings"))
         else:
-            enum_fn = fn = Path(output_dir) / (
+            enum_fn = fn = (Path(output_dir) / (
                 f"{name}_embeddings.py" if name else "embeddings.py"
-            )
+            )).as_posix()
             embed_enum_file = embed_enum_to_file(model.embed, idx_w)
             print(f"writing embedding enums to {fn}")
             with open(enum_fn, "w") as f:
@@ -951,7 +951,7 @@ def model_to_code(
     if do_black:
         m = format_str(m, mode=FileMode())
 
-    fn = Path(output_dir) / f"{name}.py"
+    fn = (Path(output_dir) / f"{name}.py").as_posix()
     length = m.count("\n")
     if save:
         print(f"writing {length} lines to {fn}")

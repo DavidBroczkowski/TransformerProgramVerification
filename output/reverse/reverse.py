@@ -22,7 +22,7 @@ def run(tokens):
 
     # classifier weights ##########################################
     classifier_weights = pd.read_csv(
-        "reverse_weights.csv", index_col=[0, 1], dtype={"feature": str}
+        "output/reverse/reverse_weights.csv", index_col=[0, 1], dtype={"feature": str}
     )
     # inputs #####################################################
     token_scores = classifier_weights.loc[[("tokens", str(v)) for v in tokens]]

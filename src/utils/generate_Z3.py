@@ -12,6 +12,7 @@ def generate_static_z3_code():
     # Headers
     lines.append("from z3 import *")
     lines.append("import pandas as pd")
+    lines.append("import numpy as np")
     lines.append("")  # empty line
 
     # aggregate_expr

@@ -389,6 +389,7 @@ def _generate_static_z3() -> str:
     # Headers
     lines.append("from z3 import *")
     lines.append("import pandas as pd")
+    lines.append("import numpy as np")
     lines.append("")  # empty line
 
     # aggregate_expr
@@ -722,7 +723,7 @@ def model_to_Z3(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Если нужно, здесь собираем weights_df, embed_df
+    # If necessary, we collect weights_df and embed_df here
     weights_path: Optional[Path] = None
     embed_path: Optional[Path] = None
 
@@ -736,21 +737,21 @@ def model_to_Z3(
         weights_df = get_unembed_df(model, idx_t, var_types=var_types, one_hot=one_hot, enums=embed_enums)
         weights_path = output_dir / f"{name}_weights.csv"
         if save:
-            print(f"Writing classifier weights to {weights_path}")
-            weights_df.to_csv(weights_path)
+            print(f"Writing classifier weights to {weights_path.as_posix()}")
+            weights_df.to_csv(weights_path.as_posix())
 
     if embed_csv:
         # Generate embeddings CSV
         embed_df = get_embed_df(model.embed, idx_w)
         embed_path = output_dir / f"{name}_embeddings.csv"
         if save:
-            print(f"Writing embeddings to {embed_path}")
-            embed_df.to_csv(embed_path)
+            print(f"Writing embeddings to {embed_path.as_posix()}")
+            embed_df.to_csv(embed_path.as_posix())
 
-    # Генерируем статические функции
+    # Generating static functions
     static_code = _generate_static_z3()
 
-    # Генерируем attention-предикаты
+    # Generating attention predicates
     predicate_blocks = []
     for layer_idx, block in enumerate(model.blocks):
         for head_idx in range(block.n_heads_cat):
@@ -761,7 +762,7 @@ def model_to_Z3(
 
     predicates_code = "\n".join(predicate_blocks)
 
-    # Генерируем MLP-выражения
+    # Generating MLP expressions
     mlp_blocks = []
     for layer_idx, block in enumerate(model.blocks):
         for mlp_idx in range(block.n_cat_mlps):
@@ -772,10 +773,10 @@ def model_to_Z3(
 
     mlp_code = "\n".join(mlp_blocks)
 
-    # Генерируем build_pipeline (аналог run)
+    # Generating build_pipeline (analog of run)
     build_pipeline_code = _generate_build_pipeline_by_run(model)
 
-    # Генерируем вычисление предсказаний
+    # Generating prediction computation
     compute_pred_code = _generate_predictions_code()
 
     # Generate weight reading code
@@ -828,7 +829,7 @@ def model_to_Z3(
 
     full_script = "\n".join(script_parts)
 
-    # (Опционально) Сохраняем на диск
+    # (Optional) Save to disk
     if save:
         out_file = output_dir / f"{name}_Z3.py"
         out_file.write_text(full_script, encoding="utf-8")
@@ -849,7 +850,7 @@ def export_model_to_Z3(
     """
     Standard wrapper: takes a Z3 script and immediately writes it to a file.
     """
-    output_dir = Path(output_dir)
+    output_dir = Path(output_dir).as_posix()
     output_file = output_dir / f"{name}_Z3.py"
     script = model_to_Z3(model, idx_w, idx_t, output_dir=output_dir, name=name, save=True, **kwargs)
     return output_file
