@@ -53,8 +53,8 @@ def _cat_head_to_z3(model, layer_idx: int, head_idx: int, idx_w: Sequence[str], 
     q_is_position = "position" in str(q).lower()
     k_is_position = "position" in str(k).lower()
 
-    q_type = "Int" if q_is_position else "String"
-    k_type = "Int" if k_is_position else "String"
+    q_type = "Int" if q_is_position else "Const"
+    k_type = "Int" if k_is_position else "Const"
 
     q_name, k_name = f"{str(q)[:-1]}", f"{str(k)[:-1]}"
     if q_name == k_name:
@@ -72,17 +72,17 @@ def _cat_head_to_z3(model, layer_idx: int, head_idx: int, idx_w: Sequence[str], 
             q_val = f"IntVal({q_i})"
         else:
             if q_i < len(idx_w):
-                q_val = f'StringVal("{idx_w[q_i]}")'
+                q_val = f'alphabet[{q_i}]'
             else:
-                q_val = f'StringVal("pad")'
+                q_val = f'Token_pad'
 
         if k_is_position:
             k_val = f"IntVal({k_j})"
         else:
             if k_j < len(idx_w):
-                k_val = f'StringVal("{idx_w[k_j]}")'
+                k_val = f'alphabet[{k_j}]'
             else:
-                k_val = f'StringVal("pad")'
+                k_val = f'Token_pad'
 
         conditions.append(f"And({q_name} == {q_val}, {k_name} == {k_val})")
 
@@ -132,8 +132,8 @@ def _num_head_to_z3(model, layer_idx: int, head_idx: int, autoregressive: bool =
     q_is_position = "position" in str(q).lower()
     k_is_position = "position" in str(k).lower()
 
-    q_type = "Int" if q_is_position else "String"
-    k_type = "Int" if k_is_position else "String"
+    q_type = "Int" if q_is_position else "Const"
+    k_type = "Int" if k_is_position else "Const"
 
     q_name, k_name = f"{str(q)[:-1]}", f"{str(k)[:-1]}"
     if q_name == k_name:
@@ -150,12 +150,12 @@ def _num_head_to_z3(model, layer_idx: int, head_idx: int, autoregressive: bool =
         if q_is_position:
             q_val = f"IntVal({q_i})"
         else:
-            q_val = f'StringVal("{q_i}")'
+            q_val = f'alphabet[{q_i}]'
 
         if k_is_position:
             k_val = f"IntVal({k_j})"
         else:
-            k_val = f'StringVal("{k_j}")'
+            k_val = f'alphabet[{k_j}]'
 
         conditions.append(f"And({q_name} == {q_val}, {k_name} == {k_val})")
 
@@ -176,7 +176,7 @@ def {func_name}({q_name}, {k_name}):
 def _cat_mlp_to_z3(model, layer_idx: int, mlp_idx: int, idx_w: Sequence[str]) -> str:
     """
     Generates an MLP expression for the categorical part.
-    Suppose it is (define-fun cat_mlp_{layer_idx}_{mlp_idx} ((pos Int) (tok String)) Int).
+    Suppose it is (define-fun cat_mlp_{layer_idx}_{mlp_idx} ((pos Int) (tok Const)) Int).
     Returns some integer value, for example, varying depending on (pos, tok).
     """
     import torch
@@ -218,7 +218,7 @@ def _cat_mlp_to_z3(model, layer_idx: int, mlp_idx: int, idx_w: Sequence[str]) ->
     param_types = []
     for var in mlp_var_names:
         is_position = "position" in var.lower()
-        param_types.append("Int" if is_position else "String")
+        param_types.append("Int" if is_position else "Const")
 
     # Create parameter names
     param_names = [f"{v[:-1]}" for v in mlp_var_names]
@@ -241,9 +241,9 @@ def _cat_mlp_to_z3(model, layer_idx: int, mlp_idx: int, idx_w: Sequence[str]) ->
                 val = f"IntVal({input_val})"
             else:
                 if input_val < len(idx_w):
-                    val = f'StringVal("{idx_w[input_val]}")'
+                    val = f'alphabet[{input_val}]'
                 else:
-                    val = f'StringVal("pad")'
+                    val = f'Token_pad'
             cond_parts.append(f"{param_name} == {val}")
 
         condition = "And(" + ", ".join(cond_parts) + ")"
@@ -323,7 +323,7 @@ def _num_mlp_to_z3(model, layer_idx: int, mlp_idx: int) -> str:
     param_types = []
     for var in mlp_var_names:
         is_position = "position" in var.lower()
-        param_types.append("Int" if is_position else "String")
+        param_types.append("Int" if is_position else "Const")
 
     # Create parameter names
     param_names = [f"{v[:-1]}" for v in mlp_var_names]
@@ -345,7 +345,7 @@ def _num_mlp_to_z3(model, layer_idx: int, mlp_idx: int) -> str:
             if param_type == "Int":
                 val = f"IntVal({input_val})"
             else:
-                val = f'StringVal("{input_val}")'
+                val = f'IntVal({input_val})'
             cond_parts.append(f"{param_name} == {val}")
 
         condition = "And(" + ", ".join(cond_parts) + ")"
@@ -389,7 +389,6 @@ def _generate_static_z3() -> str:
     # Headers
     lines.append("from z3 import *")
     lines.append("import pandas as pd")
-    lines.append("import numpy as np")
     lines.append("")  # empty line
 
     # aggregate_expr
@@ -406,12 +405,12 @@ def _generate_static_z3() -> str:
     lines.append("def build_attention_block(solver, keys, queries, predicate_expr, values, name):")
     lines.append("    \"\"\"")
     lines.append("    Building an attention block:")
-    lines.append("    - keys: list of elements (Int or String) for predicate_expr")
-    lines.append("    - queries: list of elements (Int or String) to select from")
+    lines.append("    - keys: list of elements (Int or Const) for predicate_expr")
+    lines.append("    - queries: list of elements (Int or Const) to select from")
     lines.append("    - predicate_expr: function (q, k) -> BoolRef, defining the match condition")
-    lines.append("    - values: list of elements (Int or String) for aggregate")
+    lines.append("    - values: list of elements (Int or Const) for aggregate")
     lines.append("    - name: suffix for variable names in Z3")
-    lines.append("    Returns a list of N outputs (String or Int), similar to `outs[...]`.")
+    lines.append("    Returns a list of N outputs (Const or Int), similar to `outs[...]`.")
     lines.append("    \"\"\"")
     lines.append("    N = len(keys)")
     lines.append("    # matrix of Bool variables attn[i][j]")
@@ -423,11 +422,11 @@ def _generate_static_z3() -> str:
     lines.append("    for i in range(N):")
     lines.append("        solver.add(any_match[i] == Or([predicate_expr(queries[i], keys[j]) for j in range(N)]))")
     lines.append("")
-    lines.append("    # Determine output type: Int or String, depending on values")
+    lines.append("    # Determine output type: Int or Const, depending on values")
     lines.append("    if values and isinstance(values[0], AstRef) and values[0].sort() == IntSort():")
     lines.append("        outputs = [Int(f\"attn_{name}_output_{i}\") for i in range(N)]")
     lines.append("    else:")
-    lines.append("        outputs = [String(f\"attn_{name}_output_{i}\") for i in range(N)]")
+    lines.append("        outputs = [Const(f\"attn_{name}_output_{i}\", Token) for i in range(N)]")
     lines.append("")
     lines.append("    for i in range(N):")
     lines.append("        # exactly one True in row i")
@@ -485,6 +484,7 @@ def _generate_build_pipeline_by_run(model) -> str:
     lines.append("    Returns dictionaries outputs_by_name, logits, pred_vars.")
     lines.append('    """')
     lines.append("    N = len(tokens)")
+    lines.append("    ones = [IntVal(1)] * N")
     lines.append("    # === Attention + MLP ===")
     lines.append("    outs = {}")
 
@@ -647,26 +647,26 @@ def _generate_build_pipeline_by_run(model) -> str:
     lines.append("                    if feat_name == 'ones':")
     lines.append("                        contribs.append(w)")
     lines.append("                    else:")
-    lines.append("                        if isinstance(feat_var, AstRef) and feat_var.sort() == StringSort():")
-    lines.append("                            const = StringVal(f_val)")
-    lines.append("                        else:")
+    lines.append("                        if feat_var.sort() == IntSort():")
     lines.append("                            const = IntVal(int(f_val))")
+    lines.append("                        else:")
+    lines.append("                            const = get_token_constant(f_val, alphabet)")
     lines.append("                        contribs.append(If(feat_var == const, w, RealVal('0')))")
     lines.append("            solver.add(logits[(i, cls)] == Sum(contribs))")
 
     # === Predictions ===
     lines.append("")
     lines.append("    # === Predictions ===")
-    lines.append("    pred = [String(f\"pred_{i}\") for i in range(N)]")
+    lines.append("    pred = [Const(f\"pred_{i}\", Token) for i in range(N)]")
     lines.append("    for i in range(N):")
     lines.append("        if i == 0:")
     lines.append("            solver.add(pred[i] == tokens[0])")
     lines.append("        elif i == N-1:")
     lines.append("            solver.add(pred[i] == tokens[N-1])")
     lines.append("        else:")
-    lines.append("            for cls in classes:")
+    lines.append("            for (cls_idx, cls) in enumerate(classes):")
     lines.append("                cond = And([logits[(i, cls)] >= logits[(i, o)] for o in classes if o != cls])")
-    lines.append("                solver.add(Implies(cond, pred[i] == StringVal(cls)))")
+    lines.append("                solver.add(Implies(cond, pred[i] == classes_constants[cls_idx]))")
     lines.append("")
     lines.append("    return outs, logits, pred")
 
@@ -682,20 +682,24 @@ def _generate_predictions_code() -> str:
 def compute_original_predictions(input_tokens):
     N = len(input_tokens)
     s1 = Solver()
+
     # 1. Variables and fixing input_tokens
-    tokens = [String(f"token_{i}") for i in range(N)]
+    
+    tokens = [Const(f"token_{i}", Token) for i in range(N)]
     for i, val in enumerate(input_tokens):
-        s1.add(tokens[i] == StringVal(val))
+        s1.add(tokens[i] == val)
+    
     pos = [Int(f"pos_{i}") for i in range(N)]
     for i in range(N):
         s1.add(pos[i] == IntVal(i))
+    
     # 2. Run the pipeline
     _, logits, pred_orig_vars = build_pipeline(s1, tokens, pos)
     assert s1.check() == sat
     m = s1.model()
 
     # 3. Extract concrete strings
-    return [str(m.evaluate(pred_orig_vars[i]).as_string()) for i in range(N)]
+    return [m.evaluate(pred_orig_vars[i]) for i in range(N)]
 """
 
 
@@ -781,11 +785,23 @@ def model_to_Z3(
 
     # Generate weight reading code
     weight_reading_code = []
+        
+    weight_reading_code.append("def get_token_constant(value, token_enums):")
+    weight_reading_code.append("    #Given a string value, return the corresponding Z3 constant of type Token.")
+    weight_reading_code.append("    if value in token_name_to_val:")
+    weight_reading_code.append("        return token_name_to_val[value]")
+    weight_reading_code.append("    print(f'Token value {value} not found in Token enum.')")
+    weight_reading_code.append("    return None")
+    weight_reading_code.append("")
+    weight_reading_code.append("# —————— Read weights and set up token constants ——————")
+    weight_reading_code.append("Token, alphabet = EnumSort('Token', " + str([f'{w}' for w in idx_w]) + ")")
+    weight_reading_code.append("token_name_to_val = {str(token): token for token in alphabet}")    
+    weight_reading_code.append("Token_pad = get_token_constant('<pad>', alphabet)")    
     if weights_path:
-        weight_reading_code.append("# —————— Read weights and set up constants ——————")
         weight_reading_code.append(f'classifier_weights = pd.read_csv("{weights_path.name}", index_col=[0, 1], dtype={{"feature": str}})')
         weight_reading_code.append("classes = classifier_weights.columns.tolist()")
-        weight_reading_code.append("")
+        weight_reading_code.append("classes_constants = [get_token_constant(cls, alphabet) for cls in classes]")
+    weight_reading_code.append("")
 
     script_parts = [
         "# ================================================",
@@ -815,12 +831,12 @@ def model_to_Z3(
         "",
     ])
 
-    # Add example usage
+    # Add token alphabet and example usage
     script_parts.extend([
         "# --- Example usage ---",
         "if __name__ == '__main__':",
         "    # Example input",
-        f"    example_input = {list(idx_w[:5]) + ['</s>']}",
+        f"    example_input = [get_token_constant(x, alphabet) for x in {str([f'{w}' for w in idx_w[:5]] + ['</s>'])}]",
         "    predictions = compute_original_predictions(example_input)",
         "    print(f\"Input: {example_input}\")",
         "    print(f\"Predictions: {predictions}\")",
