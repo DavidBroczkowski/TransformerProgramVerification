@@ -21,7 +21,7 @@ import torch
 import pandas as pd
 
 
-def _cat_head_to_z3(model, layer_idx: int, head_idx: int, idx_w: Sequence[str], autoregressive: bool = False) -> str:
+def _cat_head_to_z3(model, layer_idx: int, head_idx: int, idx_w: Sequence[str], autoregressive: bool = False, layer_output_type_is_int: dict = {}) -> str:
     """
     Generates a Z3 predicate for a categorical attention head. An example result might look like a function (define-fun cat_head_{layer_idx}_{head_idx}) returning a Bool.
     Inside, you can describe a set of conditions (Or/And/If): for which (q, k) the head activates.
@@ -50,11 +50,8 @@ def _cat_head_to_z3(model, layer_idx: int, head_idx: int, idx_w: Sequence[str], 
     W_pred_h = W_pred[h]
 
     # Determine parameter types based on variable names
-    q_is_position = "position" in str(q).lower()
-    k_is_position = "position" in str(k).lower()
-
-    q_type = "Int" if q_is_position else "Const"
-    k_type = "Int" if k_is_position else "Const"
+    q_is_int = "position" in str(q).lower() or ("output" in str(q) and layer_output_type_is_int['outs["' + str(q).replace("_outputs", "") + '"]'])
+    k_is_int = "position" in str(k).lower() or ("output" in str(k) and layer_output_type_is_int['outs["' + str(k).replace("_outputs", "") + '"]'])
 
     q_name, k_name = f"{str(q)[:-1]}", f"{str(k)[:-1]}"
     if q_name == k_name:
@@ -68,7 +65,7 @@ def _cat_head_to_z3(model, layer_idx: int, head_idx: int, idx_w: Sequence[str], 
         k_j = (W_pred_h[q_i]).argmax(-1).item()
 
         # Format values based on type
-        if q_is_position:
+        if q_is_int:
             q_val = f"IntVal({q_i})"
         else:
             if q_i < len(idx_w):
@@ -76,7 +73,7 @@ def _cat_head_to_z3(model, layer_idx: int, head_idx: int, idx_w: Sequence[str], 
             else:
                 q_val = f'Token_pad'
 
-        if k_is_position:
+        if k_is_int:
             k_val = f"IntVal({k_j})"
         else:
             if k_j < len(idx_w):
@@ -100,7 +97,7 @@ def {func_name}({q_name}, {k_name}):
 """
 
 
-def _num_head_to_z3(model, layer_idx: int, head_idx: int, autoregressive: bool = False) -> str:
+def _num_head_to_z3(model, layer_idx: int, head_idx: int, autoregressive: bool = False, layer_output_type_is_int: dict = {}) -> str:
     """
     Generates a Z3 predicate for a numerical attention head.  
     Similar to _cat_head_to_z3, but possibly compares numerical values directly  
@@ -129,11 +126,8 @@ def _num_head_to_z3(model, layer_idx: int, head_idx: int, autoregressive: bool =
     W_pred_h = W_pred[h]
 
     # Determine parameter types based on variable names
-    q_is_position = "position" in str(q).lower()
-    k_is_position = "position" in str(k).lower()
-
-    q_type = "Int" if q_is_position else "Const"
-    k_type = "Int" if k_is_position else "Const"
+    q_is_int = "position" in str(q).lower() or ("output" in str(q) and layer_output_type_is_int['outs["' + str(q).replace("_outputs", "") + '"]'])
+    k_is_int = "position" in str(k).lower() or ("output" in str(k) and layer_output_type_is_int['outs["' + str(k).replace("_outputs", "") + '"]'])
 
     q_name, k_name = f"{str(q)[:-1]}", f"{str(k)[:-1]}"
     if q_name == k_name:
@@ -147,12 +141,12 @@ def _num_head_to_z3(model, layer_idx: int, head_idx: int, autoregressive: bool =
         k_j = (W_pred_h[q_i]).argmax(-1).item()
 
         # Format values based on type
-        if q_is_position:
+        if q_is_int:
             q_val = f"IntVal({q_i})"
         else:
             q_val = f'alphabet[{q_i}]'
 
-        if k_is_position:
+        if k_is_int:
             k_val = f"IntVal({k_j})"
         else:
             k_val = f'alphabet[{k_j}]'
@@ -173,7 +167,7 @@ def {func_name}({q_name}, {k_name}):
 """
 
 
-def _cat_mlp_to_z3(model, layer_idx: int, mlp_idx: int, idx_w: Sequence[str]) -> str:
+def _cat_mlp_to_z3(model, layer_idx: int, mlp_idx: int, idx_w: Sequence[str], layer_output_type_is_int: dict = {}) -> str:
     """
     Generates an MLP expression for the categorical part.
     Suppose it is (define-fun cat_mlp_{layer_idx}_{mlp_idx} ((pos Int) (tok Const)) Int).
@@ -217,8 +211,9 @@ def _cat_mlp_to_z3(model, layer_idx: int, mlp_idx: int, idx_w: Sequence[str]) ->
     # Determine parameter types based on variable names
     param_types = []
     for var in mlp_var_names:
-        is_position = "position" in var.lower()
-        param_types.append("Int" if is_position else "Const")
+        indexname = 'outs["' + var.replace("_outputs", "") + '"]'
+        is_int = "position" in var.lower() or ("output" in var and indexname in layer_output_type_is_int and layer_output_type_is_int[indexname])
+        param_types.append("Int" if is_int else "Const")
 
     # Create parameter names
     param_names = [f"{v[:-1]}" for v in mlp_var_names]
@@ -277,7 +272,7 @@ def {func_name}({param_list}):
 """
 
 
-def _num_mlp_to_z3(model, layer_idx: int, mlp_idx: int) -> str:
+def _num_mlp_to_z3(model, layer_idx: int, mlp_idx: int, layer_output_type_is_int: dict = {}) -> str:
     """
     Generates an MLP expression for the numeric part.
     Suppose this is a similar function (define-fun num_mlp_{layer_idx}_{mlp_idx} ((pos Int) (val Int)) Int).
@@ -322,8 +317,9 @@ def _num_mlp_to_z3(model, layer_idx: int, mlp_idx: int) -> str:
     # Determine parameter types based on variable names
     param_types = []
     for var in mlp_var_names:
-        is_position = "position" in var.lower()
-        param_types.append("Int" if is_position else "Const")
+        indexname = 'outs["' + var.replace("_outputs", "") + '"]'
+        is_int = "position" in var.lower() or ("output" in var and indexname in layer_output_type_is_int and layer_output_type_is_int[indexname])
+        param_types.append("Int" if is_int else "Const")
 
     # Create parameter names
     param_names = [f"{v[:-1]}" for v in mlp_var_names]
@@ -471,24 +467,7 @@ def _generate_static_z3() -> str:
 
     return "\n".join(lines)
 
-
-def _generate_build_pipeline_by_run(model) -> str:
-    """
-    Returns Z3 functions/expressions that reflect the logic of run(...).
-    Automatically determines the order of layers and their outputs based on the model's structure.
-    """
-    lines = []
-    lines.append("def build_pipeline(solver, tokens, position_vars):")
-    lines.append('    """')
-    lines.append("    Pulls all attention-, MLP-blocks, generates logits and pred[i] variables.")
-    lines.append("    Returns dictionaries outputs_by_name, logits, pred_vars.")
-    lines.append('    """')
-    lines.append("    N = len(tokens)")
-    lines.append("    ones = [IntVal(1)] * N")
-    lines.append("    # === Attention + MLP ===")
-    lines.append("    outs = {}")
-
-    def map_var(var_name):
+def map_var(var_name):
         """Map variable names to Z3 variables"""
         if var_name == "tokens":
             return "tokens"
@@ -513,6 +492,22 @@ def _generate_build_pipeline_by_run(model) -> str:
                 return f'outs["mlp_{layer}_{mlp}"]'
         # Default fallback
         return var_name
+
+def _generate_build_pipeline_by_run(model) -> str:
+    """
+    Returns Z3 functions/expressions that reflect the logic of run(...).
+    Automatically determines the order of layers and their outputs based on the model's structure.
+    """
+    lines = []
+    lines.append("def build_pipeline(solver, tokens, position_vars, input):")
+    lines.append('    """')
+    lines.append("    Pulls all attention-, MLP-blocks, generates logits and pred[i] variables.")
+    lines.append("    Returns dictionaries outputs_by_name, logits, pred_vars.")
+    lines.append('    """')
+    lines.append("    N = len(tokens)")
+    lines.append("    ones = [IntVal(1)] * N")
+    lines.append("    # === Attention + MLP ===")
+    lines.append("    outs = {}")
 
     # Generate blocks in order based on model structure
     for layer_idx, block in enumerate(model.blocks):
@@ -657,11 +652,26 @@ def _generate_build_pipeline_by_run(model) -> str:
     # === Predictions ===
     lines.append("")
     lines.append("    # === Predictions ===")
-    lines.append("    pred = [Const(f\"pred_{i}\", Token) for i in range(N)]")
+    lines.append("")
+    lines.append("    # fix start and end tokens")
+    lines.append("    if input[0] == Token_start and Token_start != None:")
+    lines.append("        pred_0 = [Const(f'pred_0', Token)]")
+    lines.append("        pred_0_token = True")
+    lines.append("    else:")
+    lines.append("        pred_0 = [Const(f'pred_0', Class)]")
+    lines.append("        pred_0_token = False")
+    lines.append("    if input[N-1] == Token_end and Token_end != None:")
+    lines.append("        pred_end = [Const(f'pred_{N-1}', Token)]")
+    lines.append("        pred_end_token = True")
+    lines.append("    else:")
+    lines.append("        pred_end = [Const(f'pred_{N-1}', Class)]")
+    lines.append("        pred_end_token = False")
+    lines.append("")
+    lines.append("    pred = pred_0 + [Const(f'pred_{i}', Class) for i in range(1,N-1)] + pred_end")
     lines.append("    for i in range(N):")
-    lines.append("        if i == 0:")
+    lines.append("        if i == 0 and pred_0_token:")
     lines.append("            solver.add(pred[i] == tokens[0])")
-    lines.append("        elif i == N-1:")
+    lines.append("        elif i == N-1 and pred_end_token:")
     lines.append("            solver.add(pred[i] == tokens[N-1])")
     lines.append("        else:")
     lines.append("            for (cls_idx, cls) in enumerate(classes):")
@@ -694,7 +704,7 @@ def compute_original_predictions(input_tokens):
         s1.add(pos[i] == IntVal(i))
     
     # 2. Run the pipeline
-    _, logits, pred_orig_vars = build_pipeline(s1, tokens, pos)
+    _, logits, pred_orig_vars = build_pipeline(s1, tokens, pos, input_tokens)
     assert s1.check() == sat
     m = s1.model()
 
@@ -702,6 +712,42 @@ def compute_original_predictions(input_tokens):
     return [m.evaluate(pred_orig_vars[i]) for i in range(N)]
 """
 
+def derive_layer_output_types(model) -> dict:
+    layer_output_type_is_int = {}
+    for layer_idx, block in enumerate(model.blocks):
+        # Categorical attention heads
+        for head_idx in range(block.n_heads_cat):
+            attn = block.cat_attn
+            pi_V = attn.W_V.get_W().detach().cpu()
+
+            # Get variable names
+            cat_var_names, _, _ = get_var_names(model)
+            val_names = cat_var_names[pi_V.argmax(-1)]
+
+            if attn.W_K.n_heads == 1:
+                val_names = [val_names]
+
+            v = val_names[head_idx]
+            values_mapped = map_var(str(v))
+
+            if str(values_mapped).startswith("outs["):
+                layer_output_type_is_int[f'outs["attn_{layer_idx}_{head_idx}"]'] = layer_output_type_is_int[values_mapped]
+            else:
+                layer_output_type_is_int[f'outs["attn_{layer_idx}_{head_idx}"]'] = "position" in str(values_mapped).lower()
+
+        # Numerical attention heads
+        for head_idx in range(block.n_heads_num):
+            layer_output_type_is_int[f'outs["num_attn_{layer_idx}_{head_idx}"]'] = True
+
+        # Categorical MLPs
+        for mlp_idx in range(block.n_cat_mlps):
+            layer_output_type_is_int[f'outs["mlp_{layer_idx}_{mlp_idx}"]'] = True
+
+        # Numerical MLPs
+        for mlp_idx in range(block.n_num_mlps):
+            layer_output_type_is_int[f'outs["num_mlp_{layer_idx}_{mlp_idx}"]'] = True
+
+    return layer_output_type_is_int
 
 def model_to_Z3(
     model,
@@ -717,6 +763,7 @@ def model_to_Z3(
     output_dir: Union[str, Path] = ".",
     name: str = "program",
     save: bool = True,
+    example = ""
 ) -> str:
     """
     Generates a ready-made Z3 script directly from the model, without an intermediate Python step.
@@ -755,14 +802,17 @@ def model_to_Z3(
     # Generating static functions
     static_code = _generate_static_z3()
 
+    # Derive variable types of layer outputs
+    layer_output_type_is_int = derive_layer_output_types(model)
+
     # Generating attention predicates
     predicate_blocks = []
     for layer_idx, block in enumerate(model.blocks):
         for head_idx in range(block.n_heads_cat):
-            predicate_blocks.append(_cat_head_to_z3(model, layer_idx, head_idx, idx_w, autoregressive))
+            predicate_blocks.append(_cat_head_to_z3(model, layer_idx, head_idx, idx_w, autoregressive, layer_output_type_is_int))
 
         for head_idx in range(block.n_heads_num):
-            predicate_blocks.append(_num_head_to_z3(model, layer_idx, head_idx, autoregressive))
+            predicate_blocks.append(_num_head_to_z3(model, layer_idx, head_idx, autoregressive, layer_output_type_is_int))
 
     predicates_code = "\n".join(predicate_blocks)
 
@@ -770,10 +820,10 @@ def model_to_Z3(
     mlp_blocks = []
     for layer_idx, block in enumerate(model.blocks):
         for mlp_idx in range(block.n_cat_mlps):
-            mlp_blocks.append(_cat_mlp_to_z3(model, layer_idx, mlp_idx, idx_w))
+            mlp_blocks.append(_cat_mlp_to_z3(model, layer_idx, mlp_idx, idx_w, layer_output_type_is_int))
 
         for mlp_idx in range(block.n_num_mlps):
-            mlp_blocks.append(_num_mlp_to_z3(model, layer_idx, mlp_idx))
+            mlp_blocks.append(_num_mlp_to_z3(model, layer_idx, mlp_idx, layer_output_type_is_int))
 
     mlp_code = "\n".join(mlp_blocks)
 
@@ -794,13 +844,17 @@ def model_to_Z3(
     weight_reading_code.append("    return None")
     weight_reading_code.append("")
     weight_reading_code.append("# —————— Read weights and set up token constants ——————")
+    weight_reading_code.append("")
     weight_reading_code.append("Token, alphabet = EnumSort('Token', " + str([f'{w}' for w in idx_w]) + ")")
     weight_reading_code.append("token_name_to_val = {str(token): token for token in alphabet}")    
-    weight_reading_code.append("Token_pad = get_token_constant('<pad>', alphabet)")    
+    weight_reading_code.append("Token_pad = get_token_constant('<pad>', alphabet)")
+    weight_reading_code.append("Token_start = get_token_constant('<s>', alphabet)")
+    weight_reading_code.append("Token_end = get_token_constant('</s>', alphabet)")    
     if weights_path:
+        weight_reading_code.append("")
         weight_reading_code.append(f'classifier_weights = pd.read_csv("{weights_path.name}", index_col=[0, 1], dtype={{"feature": str}})')
         weight_reading_code.append("classes = classifier_weights.columns.tolist()")
-        weight_reading_code.append("classes_constants = [get_token_constant(cls, alphabet) for cls in classes]")
+        weight_reading_code.append("Class, classes_constants = EnumSort('Class', classes)")
     weight_reading_code.append("")
 
     script_parts = [
@@ -812,9 +866,6 @@ def model_to_Z3(
         static_code,
         "",
     ]
-
-    if weight_reading_code:
-        script_parts.extend(weight_reading_code)
 
     script_parts.extend([
         "# --- Attention predicates ---",
@@ -831,12 +882,15 @@ def model_to_Z3(
         "",
     ])
 
+    if weight_reading_code:
+        script_parts.extend(weight_reading_code)
+
     # Add token alphabet and example usage
     script_parts.extend([
         "# --- Example usage ---",
         "if __name__ == '__main__':",
         "    # Example input",
-        f"    example_input = [get_token_constant(x, alphabet) for x in {str([f'{w}' for w in idx_w[:5]] + ['</s>'])}]",
+        f"    example_input = [get_token_constant(x, alphabet) for x in {str(example)}]",
         "    predictions = compute_original_predictions(example_input)",
         "    print(f\"Input: {example_input}\")",
         "    print(f\"Predictions: {predictions}\")",
