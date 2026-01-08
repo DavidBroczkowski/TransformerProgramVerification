@@ -683,6 +683,8 @@ def _generate_build_pipeline_by_run(model) -> str:
     lines.append("                    w = RealVal(str(weights[cls]))")
     lines.append("                    if feat_name == 'ones':")
     lines.append("                        contribs.append(w)")
+    lines.append("                    elif f_val == '_':")
+    lines.append("                        contribs.append(w * feat_var)")
     lines.append("                    else:")
     lines.append("                        if feat_var.sort() == IntSort():")
     lines.append("                            const = IntVal(int(f_val))")
