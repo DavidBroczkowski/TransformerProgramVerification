@@ -470,7 +470,7 @@ def _generate_static_z3() -> str:
     # build_attention_block
     lines.append("def build_num_attention_block(solver, keys, queries, predicate_expr, values, name):")
     lines.append("    \"\"\"")
-    lines.append("    Building a numericalattention block:")
+    lines.append("    Building a numerical attention block:")
     lines.append("    - keys: list of elements (Int or Const) for predicate_expr")
     lines.append("    - queries: list of elements (Int or Const) to select from")
     lines.append("    - predicate_expr: function (q, k) -> BoolRef, defining the match condition")
@@ -604,7 +604,7 @@ def _generate_build_pipeline_by_run(model) -> str:
             values_mapped = "[IntVal(1)] * N"  # Numerical values are typically 1s
 
             lines.append(
-                f'    outs["num_attn_{layer_idx}_{head_idx}"] = build_attention_block(solver, '
+                f'    outs["num_attn_{layer_idx}_{head_idx}"] = build_num_attention_block(solver, '
                 f'{keys_mapped}, {queries_mapped}, num_predicate_{layer_idx}_{head_idx}_expr, '
                 f'{values_mapped}, "num_{layer_idx}_{head_idx}")'
             )
