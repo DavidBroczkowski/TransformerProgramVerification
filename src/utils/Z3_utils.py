@@ -341,7 +341,7 @@ def _num_mlp_to_z3(model, layer_idx: int, mlp_idx: int, layer_output_type_is_int
             if param_type == "Int":
                 val = f"IntVal({input_val})"
             else:
-                val = f'IntVal({input_val})'
+                val = f'alphabet[{input_val}]'
             cond_parts.append(f"{param_name} == {val}")
 
         condition = "And(" + ", ".join(cond_parts) + ")"
@@ -412,11 +412,11 @@ def _generate_static_z3() -> str:
     lines.append("    # matrix of Bool variables attn[i][j]")
     lines.append("    attn = [[Bool(f\"attn_{name}_{i}_{j}\") for j in range(N)] for i in range(N)]")
     lines.append("    # flags: for each i, is there any match among keys[j]")
-    lines.append("    any_match = [Bool(f\"any_{name}_{i}\") for i in range(N)]")
+    lines.append("    nr_matches = [Int(f\"nr_matches_{name}_{i}\") for i in range(N)]")
     lines.append("")
     lines.append("    # Calculate any_match[i] == Or(predicate_expr(queries[i], keys[j]) for j in range(N))")
     lines.append("    for i in range(N):")
-    lines.append("        solver.add(any_match[i] == Or([predicate_expr(queries[i], keys[j]) for j in range(N)]))")
+    lines.append("        solver.add(nr_matches[i] == Sum([If(predicate_expr(queries[i], keys[j]), 1, 0) for j in range(N)]))")
     lines.append("")
     lines.append("    # Determine output type: Int or Const, depending on values")
     lines.append("    if values and isinstance(values[0], AstRef) and values[0].sort() == IntSort():")
@@ -432,7 +432,7 @@ def _generate_static_z3() -> str:
     lines.append("        for j in range(N):")
     lines.append("            if j == 0:")
     lines.append("                # fallback: attn[i][0] can be True if there's no match, or if predicate_expr is true for (i,0)")
-    lines.append("                solver.add(Implies(attn[i][0], Or(Not(any_match[i]), predicate_expr(queries[i], keys[0]))))")
+    lines.append("                solver.add(Implies(attn[i][0], Or(nr_matches[i] == 0, predicate_expr(queries[i], keys[0]))))")
     lines.append("            else:")
     lines.append("                # if attn[i][j] == True, then predicate_expr(queries[i], keys[j]) must be True")
     lines.append("                solver.add(Implies(attn[i][j], predicate_expr(queries[i], keys[j])))")
@@ -441,9 +441,20 @@ def _generate_static_z3() -> str:
     lines.append("        # then distance |i-k| <= |i-j| for all j.")
     lines.append("        for j in range(N):")
     lines.append("            for k in range(N):")
+    lines.append("")
+    lines.append("                if i == k:")
+    lines.append("                    k_dist = nr_matches[i]")
+    lines.append("                else:")
+    lines.append("                    k_dist = Abs(i - k)")
+    lines.append("")
+    lines.append("                if i == j:")
+    lines.append("                    j_dist = nr_matches[i]")
+    lines.append("                else:")
+    lines.append("                    j_dist = Abs(i - j)")
+    lines.append("")
     lines.append("                solver.add(Implies(")
     lines.append("                    And(attn[i][k], predicate_expr(queries[i], keys[j])),")
-    lines.append("                    Abs(i - k) <= Abs(i - j)")
+    lines.append("                    k_dist <= j_dist")
     lines.append("                ))")
     lines.append("")
     lines.append("        # aggregate: select a value from values based on the attn[i] vector")
