@@ -50,8 +50,8 @@ def _cat_head_to_z3(model, layer_idx: int, head_idx: int, idx_w: Sequence[str], 
     W_pred_h = W_pred[h]
 
     # Determine parameter types based on variable names
-    q_is_int = "position" in str(q).lower() or ("output" in str(q) and layer_output_type_is_int['outs["' + str(q).replace("_outputs", "") + '"]'])
-    k_is_int = "position" in str(k).lower() or ("output" in str(k) and layer_output_type_is_int['outs["' + str(k).replace("_outputs", "") + '"]'])
+    q_is_int = "position" in str(q).lower() or "one" in str(q).lower() or ("output" in str(q) and layer_output_type_is_int['outs["' + str(q).replace("_outputs", "") + '"]'])
+    k_is_int = "position" in str(k).lower() or "one" in str(k).lower() or ("output" in str(k) and layer_output_type_is_int['outs["' + str(k).replace("_outputs", "") + '"]'])
 
     q_name, k_name = f"{str(q)[:-1]}", f"{str(k)[:-1]}"
     if q_name == k_name:
@@ -126,8 +126,8 @@ def _num_head_to_z3(model, layer_idx: int, head_idx: int, autoregressive: bool =
     W_pred_h = W_pred[h]
 
     # Determine parameter types based on variable names
-    q_is_int = "position" in str(q).lower() or ("output" in str(q) and layer_output_type_is_int['outs["' + str(q).replace("_outputs", "") + '"]'])
-    k_is_int = "position" in str(k).lower() or ("output" in str(k) and layer_output_type_is_int['outs["' + str(k).replace("_outputs", "") + '"]'])
+    q_is_int = "position" in str(q).lower() or "one" in str(q).lower() or ("output" in str(q) and layer_output_type_is_int['outs["' + str(q).replace("_outputs", "") + '"]'])
+    k_is_int = "position" in str(k).lower() or "one" in str(k).lower() or ("output" in str(k) and layer_output_type_is_int['outs["' + str(k).replace("_outputs", "") + '"]'])
 
     q_name, k_name = f"{str(q)[:-1]}", f"{str(k)[:-1]}"
     if q_name == k_name:
@@ -212,7 +212,7 @@ def _cat_mlp_to_z3(model, layer_idx: int, mlp_idx: int, idx_w: Sequence[str], la
     param_types = []
     for var in mlp_var_names:
         indexname = 'outs["' + var.replace("_outputs", "") + '"]'
-        is_int = "position" in var.lower() or ("output" in var and indexname in layer_output_type_is_int and layer_output_type_is_int[indexname])
+        is_int = "position" in var.lower() or "one" in var.lower() or ("output" in var and indexname in layer_output_type_is_int and layer_output_type_is_int[indexname])
         param_types.append("Int" if is_int else "Const")
 
     # Create parameter names
@@ -318,7 +318,7 @@ def _num_mlp_to_z3(model, layer_idx: int, mlp_idx: int, layer_output_type_is_int
     param_types = []
     for var in mlp_var_names:
         indexname = 'outs["' + var.replace("_outputs", "") + '"]'
-        is_int = "position" in var.lower() or ("output" in var and indexname in layer_output_type_is_int and layer_output_type_is_int[indexname])
+        is_int = "position" in var.lower() or "one" in var.lower() or ("output" in var and indexname in layer_output_type_is_int and layer_output_type_is_int[indexname])
         param_types.append("Int" if is_int else "Const")
 
     # Create parameter names
@@ -397,6 +397,10 @@ def _generate_static_z3() -> str:
     lines.append("    return expr")
     lines.append("")
 
+    lines.append("def aggregate_sum_expr(attn_row, values):")
+    lines.append("    return Sum([If(attn_row[j], values[j], 0) for j in range(len(attn_row))])")
+    lines.append("")
+
     # build_attention_block
     lines.append("def build_attention_block(solver, keys, queries, predicate_expr, values, name):")
     lines.append("    \"\"\"")
@@ -459,6 +463,33 @@ def _generate_static_z3() -> str:
     lines.append("")
     lines.append("        # aggregate: select a value from values based on the attn[i] vector")
     lines.append("        solver.add(outputs[i] == aggregate_expr(attn[i], values))")
+    lines.append("")
+    lines.append("    return outputs")
+    lines.append("")
+
+    # build_attention_block
+    lines.append("def build_num_attention_block(solver, keys, queries, predicate_expr, values, name):")
+    lines.append("    \"\"\"")
+    lines.append("    Building a numericalattention block:")
+    lines.append("    - keys: list of elements (Int or Const) for predicate_expr")
+    lines.append("    - queries: list of elements (Int or Const) to select from")
+    lines.append("    - predicate_expr: function (q, k) -> BoolRef, defining the match condition")
+    lines.append("    - values: list of elements (Int or Const) for aggregate")
+    lines.append("    - name: suffix for variable names in Z3")
+    lines.append("    Returns a list of N outputs (Const or Int), similar to `outs[...]`.")
+    lines.append("    \"\"\"")
+    lines.append("    N = len(keys)")
+    lines.append("    # matrix of Bool variables attn[i][j]")
+    lines.append("    attn = [[Bool(f\"attn_{name}_{i}_{j}\") for j in range(N)] for i in range(N)]")
+    lines.append("")
+    lines.append("    # Determine output type: Int or Const, depending on values")
+    lines.append("    if values and isinstance(values[0], AstRef) and values[0].sort() == IntSort():")
+    lines.append("        outputs = [Int(f\"attn_{name}_output_{i}\") for i in range(N)]")
+    lines.append("    else:")
+    lines.append("        outputs = [Const(f\"attn_{name}_output_{i}\", Token) for i in range(N)]")
+    lines.append("")
+    lines.append("    for i in range(N):")
+    lines.append("        solver.add(outputs[i] == aggregate_sum_expr([predicate_expr(queries[i], keys[j]) for j in range(N)], values))")
     lines.append("")
     lines.append("    return outputs")
     lines.append("")
@@ -744,7 +775,7 @@ def derive_layer_output_types(model) -> dict:
             if str(values_mapped).startswith("outs["):
                 layer_output_type_is_int[f'outs["attn_{layer_idx}_{head_idx}"]'] = layer_output_type_is_int[values_mapped]
             else:
-                layer_output_type_is_int[f'outs["attn_{layer_idx}_{head_idx}"]'] = "position" in str(values_mapped).lower()
+                layer_output_type_is_int[f'outs["attn_{layer_idx}_{head_idx}"]'] = "position" in str(values_mapped).lower() or "one" in str(values_mapped).lower()
 
         # Numerical attention heads
         for head_idx in range(block.n_heads_num):
