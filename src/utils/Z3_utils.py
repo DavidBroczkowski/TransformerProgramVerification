@@ -541,7 +541,7 @@ def _generate_build_pipeline_by_run(model) -> str:
     Automatically determines the order of layers and their outputs based on the model's structure.
     """
     lines = []
-    lines.append("def build_pipeline(solver, tokens, position_vars, input):")
+    lines.append("def build_pipeline(solver, tokens, position_vars, enforce_start_end_tokens = True):")
     lines.append('    """')
     lines.append("    Pulls all attention-, MLP-blocks, generates logits and pred[i] variables.")
     lines.append("    Returns dictionaries outputs_by_name, logits, pred_vars.")
@@ -601,7 +601,7 @@ def _generate_build_pipeline_by_run(model) -> str:
             # Map variable names to Z3 variables
             keys_mapped = map_var(str(k))
             queries_mapped = map_var(str(q))
-            values_mapped = "[IntVal(1)] * N"  # Numerical values are typically 1s
+            values_mapped = map_var(str(v)) #"[IntVal(1)] * N"  # Numerical values are typically 1s
 
             lines.append(
                 f'    outs["num_attn_{layer_idx}_{head_idx}"] = build_num_attention_block(solver, '
@@ -689,7 +689,7 @@ def _generate_build_pipeline_by_run(model) -> str:
     lines.append("                        if feat_var.sort() == IntSort():")
     lines.append("                            const = IntVal(int(f_val))")
     lines.append("                        else:")
-    lines.append("                            const = get_token_constant(f_val, alphabet)")
+    lines.append("                            const = get_enum_constant(f_val, token_name_to_val)")
     lines.append("                        contribs.append(If(feat_var == const, w, RealVal('0')))")
     lines.append("            solver.add(logits[(i, cls)] == Sum(contribs))")
 
@@ -698,13 +698,13 @@ def _generate_build_pipeline_by_run(model) -> str:
     lines.append("    # === Predictions ===")
     lines.append("")
     lines.append("    # fix start and end tokens")
-    lines.append("    if input[0] == Token_start and Token_start != None:")
+    lines.append("    if enforce_start_end_tokens and Token_start != None:")
     lines.append("        pred_0 = [Const(f'pred_0', Token)]")
     lines.append("        pred_0_token = True")
     lines.append("    else:")
     lines.append("        pred_0 = [Const(f'pred_0', Class)]")
     lines.append("        pred_0_token = False")
-    lines.append("    if input[N-1] == Token_end and Token_end != None:")
+    lines.append("    if enforce_start_end_tokens and Token_end != None:")
     lines.append("        pred_end = [Const(f'pred_{N-1}', Token)]")
     lines.append("        pred_end_token = True")
     lines.append("    else:")
@@ -721,6 +721,9 @@ def _generate_build_pipeline_by_run(model) -> str:
     lines.append("            for (cls_idx, cls) in enumerate(classes):")
     lines.append("                cond = And([logits[(i, cls)] >= logits[(i, o)] for o in classes if o != cls])")
     lines.append("                solver.add(Implies(cond, pred[i] == classes_constants[cls_idx]))")
+    lines.append("")
+    lines.append("    solver.add(token_to_unified_constraints)")
+    lines.append("    solver.add(class_to_unified_constraints)")
     lines.append("")
     lines.append("    return outs, logits, pred")
 
@@ -748,7 +751,7 @@ def compute_original_predictions(input_tokens):
         s1.add(pos[i] == IntVal(i))
     
     # 2. Run the pipeline
-    _, logits, pred_orig_vars = build_pipeline(s1, tokens, pos, input_tokens)
+    _, logits, pred_orig_vars = build_pipeline(s1, tokens, pos, N > 0 and input_tokens[0] == Token_start)
     assert s1.check() == sat
     m = s1.model()
 
@@ -880,25 +883,37 @@ def model_to_Z3(
     # Generate weight reading code
     weight_reading_code = []
         
-    weight_reading_code.append("def get_token_constant(value, token_enums):")
+    weight_reading_code.append("def get_enum_constant(value, str_to_const):")
     weight_reading_code.append("    #Given a string value, return the corresponding Z3 constant of type Token.")
-    weight_reading_code.append("    if value in token_name_to_val:")
-    weight_reading_code.append("        return token_name_to_val[value]")
-    weight_reading_code.append("    print(f'Token value {value} not found in Token enum.')")
+    weight_reading_code.append("    if value in str_to_const:")
+    weight_reading_code.append("        return str_to_const[value]")
+    weight_reading_code.append("    print(f'Constant value {value} not found in enum sort.')")
     weight_reading_code.append("    return None")
     weight_reading_code.append("")
     weight_reading_code.append("# —————— Read weights and set up token constants ——————")
     weight_reading_code.append("")
     weight_reading_code.append("Token, alphabet = EnumSort('Token', " + str([f'{w}' for w in idx_w]) + ")")
     weight_reading_code.append("token_name_to_val = {str(token): token for token in alphabet}")    
-    weight_reading_code.append("Token_pad = get_token_constant('<pad>', alphabet)")
-    weight_reading_code.append("Token_start = get_token_constant('<s>', alphabet)")
-    weight_reading_code.append("Token_end = get_token_constant('</s>', alphabet)")    
+    weight_reading_code.append("Token_pad = get_enum_constant('<pad>', token_name_to_val)")
+    weight_reading_code.append("Token_start = get_enum_constant('<s>', token_name_to_val)")
+    weight_reading_code.append("Token_end = get_enum_constant('</s>', token_name_to_val)")    
     if weights_path:
         weight_reading_code.append("")
         weight_reading_code.append(f'classifier_weights = pd.read_csv("{weights_path.name}", index_col=[0, 1], dtype={{"feature": str}})')
         weight_reading_code.append("classes = classifier_weights.columns.tolist()")
         weight_reading_code.append("Class, classes_constants = EnumSort('Class', classes)")
+        weight_reading_code.append("class_name_to_val = {str(cls): cls for cls in classes_constants}")
+        weight_reading_code.append("")
+        weight_reading_code.append("tokens_and_classes = classes + [str(token) for token in alphabet if str(token) not in classes]")
+        weight_reading_code.append("UnifiedTokCls, unified_constants = EnumSort('Unified', tokens_and_classes)")
+        weight_reading_code.append("unified_name_to_val = {str(uc): uc for uc in unified_constants}")
+        weight_reading_code.append("token_to_unified = Function('token_to_unified', Token, UnifiedTokCls)")
+        weight_reading_code.append("token_to_unified_constraints = [token_to_unified(token) == get_enum_constant(str(token), unified_name_to_val) for token in alphabet]")
+        weight_reading_code.append("class_to_unified = Function('class_to_unified', Class, UnifiedTokCls)")
+        weight_reading_code.append("class_to_unified_constraints = [class_to_unified(cls) == get_enum_constant(str(cls), unified_name_to_val) for cls in classes_constants]")
+        weight_reading_code.append("")
+        weight_reading_code.append("def token_equals_class(token, cls):")
+        weight_reading_code.append("    return token_to_unified(token) == class_to_unified(cls)")
     weight_reading_code.append("")
 
     script_parts = [
@@ -934,7 +949,7 @@ def model_to_Z3(
         "# --- Example usage ---",
         "if __name__ == '__main__':",
         "    # Example input",
-        f"    example_input = [get_token_constant(x, alphabet) for x in {str(example)}]",
+        f"    example_input = [get_enum_constant(x, token_name_to_val) for x in {str(example)}]",
         "    predictions = compute_original_predictions(example_input)",
         "    print(f\"Input: {example_input}\")",
         "    print(f\"Predictions: {predictions}\")",
