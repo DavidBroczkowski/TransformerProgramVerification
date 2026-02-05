@@ -27,6 +27,7 @@ from src.models.programs import (
     softmax,
 )
 from src.utils import code_utils, data_utils, logging, metric_utils, Z3_utils
+#from evaluation.lirpa import evaluate_sorting
 logger = logging.get_logger(__name__)
 
 
@@ -505,10 +506,13 @@ def run_program(
                 autoregressive=args.autoregressive,
                 var_types=True,
                 output_dir=args.output_dir,
-                name=args.dataset
+                name=args.dataset,
+                example=x
             )
         except Exception as e:
             logger.error(f"error saving Z3: {e}")
+
+    #evaluate_sorting(model, idx_w, seq_len=X_train.shape[1])
 
     return df
 

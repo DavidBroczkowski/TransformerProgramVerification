@@ -532,7 +532,7 @@ def get_classification_dataset(
     train, val, test = lst
     if dataset_size is not None and dataset_size > 0 and dataset_size < len(train):
         random.seed(seed)
-        train = random.sample(train, dataset_size)
+        train = random.sample(sorted(train), dataset_size)
     if get_val:
         return (
             train,
