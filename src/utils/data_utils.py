@@ -7,6 +7,7 @@ from pathlib import Path
 import random
 import re
 import string
+import json
 
 import datasets
 import gensim.downloader
@@ -19,6 +20,8 @@ from sklearn.preprocessing import normalize
 import torch
 from torch import nn
 from torch.nn import functional as F
+import csv
+from pathlib import Path
 
 from src.utils import logging
 
@@ -115,12 +118,15 @@ def make_double_hist(
 def make_sort(vocab_size, dataset_size, min_length=4, max_length=16, seed=0):
     vocab = np.array([str(i) for i in range(vocab_size - 3)])
     sents, tags = [], []
+    export_dataset = []
     np.random.seed(seed)
     for _ in range(dataset_size):
         l = np.random.randint(min_length, max_length - 1)
         sent = np.random.choice(vocab, size=l, replace=True).tolist()
+        export_dataset.append(sent)
         sents.append([BOS] + sent + [EOS])
         tags.append([PAD] + sorted(sent) + [PAD])
+
     return pd.DataFrame({"sent": sents, "tags": tags})
 
 
@@ -232,6 +238,7 @@ def get_tokenizer(train, vocab_size=None, unk=False):
     tags += sorted(set(t for ts in train["tags"] for t in ts if t not in tags))
     idx_t = np.array(tags)
     t_idx = {t: i for i, t in enumerate(idx_t)}
+
     return idx_w, w_idx, idx_t, t_idx
 
 
@@ -392,7 +399,7 @@ def get_conll_ner(
         }
         tag_col = "chunk_tags"
     else:
-        data = datasets.load_dataset("conll2003", trust_remote_code=True)
+        data = datasets.load_dataset("eriktks/conll2003",revision="convert/parquet")
         t_idx = {
             "O": 0,
             "B-PER": 1,
@@ -433,7 +440,7 @@ def get_conll_ner(
             s = re.sub(r"[0-9]+", "@", s)
         return s
 
-    for d in (train, test, val):
+    for d, name in zip((train, test, val), ("train", "test", "val")):
         sents = [
             [BOS] + [fmt(w) for w in wds] + [EOS]
             for wds in d["tokens"]
@@ -442,6 +449,20 @@ def get_conll_ner(
         tags = [
             [PAD] + idx_t[ts].tolist() + [PAD] for ts in d[tag_col] if f(ts)
         ]
+
+        # export dataset to json
+        DATA_DIR = Path(__file__).parent.parent.parent.parent / "Beaver/experiments/conll/data"
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        DEFAULT_DATASET_PATH = str(DATA_DIR / f"{name}.json")
+
+        export_dataset(
+            {
+                "inputs": remove_special_tokens(sents),
+                "tags": remove_special_tokens(tags)
+            }, 
+            "conll", 
+            DEFAULT_DATASET_PATH
+        )
         lst.append(pd.DataFrame({"sent": sents, "tags": tags}))
     logger.info(f"kept {len(lst[0])}/{len(train)} training examples")
     train, test, val = lst
@@ -633,6 +654,21 @@ def get_dataset(
             max_length=max_length,
             seed=seed,
         )
+
+    # export dataset to csv
+    DATA_DIR = Path(__file__).parent.parent.parent.parent / "Beaver/experiments/conll/data"
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    DEFAULT_DATASET_PATH = str(DATA_DIR / f"{fns}.json")
+
+    export_dataset(
+        {
+            "inputs": remove_special_tokens(df["sent"].to_list()),
+            "tags": remove_special_tokens(df["tags"].to_list())
+        }, 
+        fns, 
+        DEFAULT_DATASET_PATH
+    )
+
     train, test = train_test_split(df, test_size=test_size, random_state=seed)
     if get_val:
         train, val = train_test_split(
@@ -689,3 +725,31 @@ def get_glove_embeddings(
             n_components=dim, random_state=0
         ).fit_transform(emb)
     return emb
+
+def export_dataset(dataset, dataset_name: str, output_path: str):
+    """
+    Writes a given dataset to a path
+
+    Inputs:
+        - dataset: contains the dataset to write, expects a dictionary
+        - dataset_name: a String, the name of the dataset/task
+        - output_path: a String, the path to write the dataset to
+    Output:
+    """
+    
+    print(f"[INFO] Writing to {output_path} the {dataset_name} dataset")
+    with open(output_path, 'w') as file:
+        json.dump(dataset, file)
+
+    print("[INFO] Writing complete")
+
+def remove_special_tokens(data: list):
+    """
+    Removes the BOS and EOS tokens from the data
+
+    Inputs:
+        - data: a 2d list of data
+    Output:
+        - a 2d list of the data without BOS or EOS tokens
+    """
+    return [sent[1:len(sent)-1] for sent in data]
