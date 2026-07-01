@@ -658,14 +658,14 @@ def get_dataset(
     # export dataset to csv
     DATA_DIR = Path(__file__).parent.parent.parent.parent / "Beaver/experiments/conll/data"
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    DEFAULT_DATASET_PATH = str(DATA_DIR / f"{fns}.json")
+    DEFAULT_DATASET_PATH = str(DATA_DIR / f"{name}.json")
 
     export_dataset(
         {
             "inputs": remove_special_tokens(df["sent"].to_list()),
             "tags": remove_special_tokens(df["tags"].to_list())
         }, 
-        fns, 
+        name, 
         DEFAULT_DATASET_PATH
     )
 
