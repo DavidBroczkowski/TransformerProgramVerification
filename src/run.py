@@ -7,6 +7,8 @@ import json
 import math
 from pathlib import Path
 import random
+import os
+import sys
 
 import einops
 import numpy as np
@@ -99,6 +101,7 @@ def parse_args():
     parser.add_argument("--save_Z3", action="store_true")
 
     parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument("--gpu_uuid", type=str, default="0") # default is first GPU
 
     args = parser.parse_args()
 
@@ -676,7 +679,13 @@ def run(args):
 
 if __name__ == "__main__":
     args = parse_args()
+
+    # set GPU
+    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_uuid
+    print(f"[DEBUG] Using GPU {torch.cuda.get_device_name()} with properties {torch.cuda.get_device_properties()}")
+
     logger.info(f"args: {vars(args)}")
     with open(Path(args.output_dir) / "args.json", "w") as f:
         json.dump(vars(args), f)
+    
     run(args)
